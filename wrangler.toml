@@ -1,0 +1,22 @@
+name = "playon"
+main = "src/index.ts"
+compatibility_date = "2025-03-21"
+workers_dev = true
+
+# Supply your Cloudflare Account ID via the CLOUDFLARE_ACCOUNT_ID environment variable or CI secret.
+# Production secrets (set via `wrangler secret put <NAME>`):
+#   PROXY_SIGNING_SECRET  — Enables HMAC-SHA256 signed URLs on /api/proxy (recommended in production)
+#
+# Optional non-secret runtime variables (uncomment under [vars] or override per environment):
+# [vars]
+# PROXY_SIG_TTL_SEC = "21600"
+# PROXY_ALLOWED_HOSTS = "*.akamaized.net,*.aiv-cdn.net,*.cloudfront.net"
+# ALLOWED_ORIGINS = "https://app.example.com"
+# LOG_LEVEL = "error"
+
+[observability]
+enabled = true
+
+[dev]
+port = 3000
+ip = "0.0.0.0"

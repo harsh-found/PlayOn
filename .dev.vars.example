@@ -1,0 +1,17 @@
+# PlayOn Cloudflare Worker local development variables (.dev.vars)
+# Copy this file to .dev.vars for local `wrangler dev`, or set secrets in production via `wrangler secret put <NAME>`.
+
+# Optional: HMAC-SHA256 signing secret for /api/proxy (strongly recommended in production to prevent open-proxy abuse)
+PROXY_SIGNING_SECRET=replace-with-32-byte-random-hex-secret
+
+# Optional: Signed /api/proxy URL TTL in seconds (default: 21600 = 6 hours, clamped to [60, 86400])
+PROXY_SIG_TTL_SEC=21600
+
+# Optional: Comma-separated egress host allowlist for /api/proxy (supports leading wildcard *.domain.com)
+# PROXY_ALLOWED_HOSTS=*.akamaized.net,*.aiv-cdn.net,*.cloudfront.net
+
+# Optional: Comma-separated CORS origin allowlist (default: "*" when unset)
+# ALLOWED_ORIGINS=https://app.example.com,https://staging.example.com
+
+# Optional: Structured JSON request logging level (silent | error | info; default: silent)
+LOG_LEVEL=info
