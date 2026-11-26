@@ -140,19 +140,51 @@ async function run(): Promise<void> {
     }
   }
 
-  // 11. GET /api/health & GET /api/metrics
-  const healthRes = await fetch(`${baseUrl}/api/health`);
+  // 11. Opt-in DASH -> HLS v7 conversion check (skips gracefully if proxy signing is enabled)
+  const dashHlsRes = await fetch(`${baseUrl}/api/proxy?url=${encodeURIComponent("https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd")}&hls=1`);
+  const dashHlsBody = await dashHlsRes.text();
+  const dashSignedProtected = dashHlsRes.status === 403 && dashHlsBody.includes("MISSING_SIGNATURE");
   assertCheck(
-    "GET /api/health (no-store)",
-    healthRes.status === 200 && healthRes.headers.get("Cache-Control") === "no-store",
-    healthRes.status
+    "GET /api/proxy?hls=1 (opt-in DASH->HLS)",
+    dashSignedProtected || (dashHlsRes.status === 200 && (dashHlsRes.headers.get("Content-Type") ?? "").includes("mpegurl") && dashHlsBody.includes("#EXTM3U")),
+    dashHlsRes.status,
+    dashSignedProtected ? "signed-proxy-protected" : `ct=${dashHlsRes.headers.get("Content-Type") ?? "none"}`
+  );
+
+  // 12. GET /api/health & GET /api/metrics (6/6 providers + Cricify active + zero-loss)
+  const healthRes = await fetch(`${baseUrl}/api/health`);
+  const healthJson = (await healthRes.json()) as {
+    data?: { providers?: { total: number; healthy: number }; profile?: { mode: string; active: boolean } };
+  };
+  assertCheck(
+    "GET /api/health (no-store, 6/6 providers, active profile)",
+    healthRes.status === 200 &&
+      healthRes.headers.get("Cache-Control") === "no-store" &&
+      healthJson.data?.providers?.healthy === 6 &&
+      healthJson.data?.profile?.active === true,
+    healthRes.status,
+    `healthy=${healthJson.data?.providers?.healthy ?? 0}/6, profile=${healthJson.data?.profile?.mode ?? "none"}`
   );
 
   const metricsRes = await fetch(`${baseUrl}/api/metrics`);
+  const metricsJson = (await metricsRes.json()) as {
+    data?: {
+      reconciliation?: {
+        summary?: { unmappedRawItemsCount?: number; healthyProviders?: number };
+        providerAccounting?: Array<{ provider: string; validItemsCount: number }>;
+      };
+    };
+  };
+  const cricifyCount = metricsJson.data?.reconciliation?.providerAccounting?.find((p) => p.provider === "cricify")?.validItemsCount ?? 0;
+  const unmapped = metricsJson.data?.reconciliation?.summary?.unmappedRawItemsCount ?? -1;
   assertCheck(
-    "GET /api/metrics (no-store)",
-    metricsRes.status === 200 && metricsRes.headers.get("Cache-Control") === "no-store",
-    metricsRes.status
+    "GET /api/metrics (no-store, zero-loss, cricify > 0)",
+    metricsRes.status === 200 &&
+      metricsRes.headers.get("Cache-Control") === "no-store" &&
+      unmapped === 0 &&
+      cricifyCount > 0,
+    metricsRes.status,
+    `cricify=${cricifyCount}, unmapped=${unmapped}`
   );
 
   const failed = results.filter((r) => !r.ok);

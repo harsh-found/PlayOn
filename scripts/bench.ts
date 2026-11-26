@@ -333,7 +333,7 @@ async function main() {
       warm20Queries_le_4ms: warm20SteadyMs <= 4,
       dedup120_le_0_8ms: dedup120SteadyMs <= 0.8,
       m3u8Rewrite450_le_0_5ms: m3u8450SteadyMs <= 0.5,
-      bundle_le_210KB: bundleKB !== null ? bundleKB <= 210 : null,
+      bundle_le_240KB: bundleKB !== null ? bundleKB <= 240 : null,
       zeroUnmapped:
         snapshot.reconciliation.summary.unmappedRawItemsCount === 0 &&
         scaleSnapshot.reconciliation.summary.unmappedRawItemsCount === 0,

@@ -12,6 +12,8 @@ workers_dev = true
 # PROXY_SIG_TTL_SEC = "21600"
 # PROXY_ALLOWED_HOSTS = "*.akamaized.net,*.aiv-cdn.net,*.cloudfront.net"
 # ALLOWED_ORIGINS = "https://app.example.com"
+# CNC_PROFILES = "p_example11111,p_example22222"
+# CNC_PROFILE_TTL_SEC = "21600"
 # LOG_LEVEL = "error"
 
 [observability]

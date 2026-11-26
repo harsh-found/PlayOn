@@ -1,11 +1,11 @@
 # PlayOn
 
-[![Version](https://img.shields.io/badge/version-1.0.0-111827?style=flat-square)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.0.1-111827?style=flat-square)](./CHANGELOG.md)
 [![Runtime](https://img.shields.io/badge/Cloudflare%20Workers-workerd-F38020?style=flat-square&logo=cloudflareworkers&logoColor=white)](./wrangler.toml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6%20strict-3178C6?style=flat-square&logo=typescript&logoColor=white)](./tsconfig.json)
 [![Dependencies](https://img.shields.io/badge/runtime%20deps-0-16A34A?style=flat-square)](./package.json)
-[![Tests](https://img.shields.io/badge/tests-128%20passing-16A34A?style=flat-square)](./test)
-[![Bundle](https://img.shields.io/badge/worker%20upload-67%20KiB%20gzip-0EA5E9?style=flat-square)](./package.json)
+[![Tests](https://img.shields.io/badge/tests-141%20passing-16A34A?style=flat-square)](./test)
+[![Bundle](https://img.shields.io/badge/worker%20upload-75%20KiB%20gzip-0EA5E9?style=flat-square)](./package.json)
 [![License](https://img.shields.io/badge/license-ISC-64748B?style=flat-square)](./package.json)
 
 **PlayOn** is a zero-dependency Cloudflare Workers edge API that aggregates live sports catalogs across 6 upstream providers, reconciles duplicate fixtures into stable event IDs in `O(N)` time, deduplicates and ranks multi-CDN streams, and proxies HLS/DASH media with SSRF and HMAC-SHA256 protections.
@@ -29,18 +29,18 @@ Measured with `npm run bench` (deterministic 796-item and 2,493-item messy 6-pro
 | **Stream dedup + scoring + ranking (120 -> 40)** | **`0.77 ms`** | Includes spam filtering, bridge unwrapping & mirror folding |
 | **HLS M3U8 rewrite (450 segments + tags)** | **`0.31 ms`** | Rewrites relative URIs, `EXT-X-KEY`, `EXT-X-MAP`, `EXT-X-MEDIA` |
 | **Unmapped raw catalog items** | **`0`** | Verified zero-loss accounting (`unmappedRawItemsCount === 0`) |
-| **Bundle size (`dist/index.js` unminified)** | **`209.2 KB`** | `4,280 LOC` across `21` files in `src/` |
-| **Cloudflare Worker upload (`--dry-run`)** | **`67.3 KiB gzip`** | `222.3 KiB` uncompressed (`0` runtime deps) |
+| **Bundle size (`dist/index.js` unminified)** | **`235.2 KB`** | `4,885 LOC` across `22` files in `src/` |
+| **Cloudflare Worker upload (`--dry-run`)** | **`75.0 KiB gzip`** | `249.5 KiB` uncompressed (`0` runtime deps) |
 | **Paginated `/api/events?limit=20` payload** | **`21.7 KB`** | Lean UI fields by default; debug metadata opt-in via `?include=debug` |
 
 ---
 
 ## Core Capabilities
 
-- **6-Provider `O(N)` Match Reconciliation:** Normalizes and merges `sportzx`, `playztv`, `livxow`, `sktech`, `playfy`, and `cricify` feeds using exact canonical keys, same-kickoff cricket format resolution, 4-hour sliding near-time windows, individual-sport surname matching, club acronym/fuzzy matching, and reversed home/away detection.
+- **6-Provider `O(N)` Match Reconciliation & Rotating CNCVerse Profiles:** Normalizes and merges strictly the 6 live-sports providers (`sportzx`, `playztv`, `livxow`, `sktech`, `playfy`, `cricify`) — auto-provisioning and rotating anonymous 6-provider CNCVerse profiles (L1 + L2 persisted, TTL-rotated, reactive `403`/`429` rotation, or optional `CNC_PROFILES` pool) so `CricifyLiveEvents` is always active alongside the other 5 feeds with zero non-sports overhead.
 - **Stable `evt_*` Event IDs:** Anchored to a `04:00 UTC` sports-day rollover and non-volatile discriminators so IDs stay stable across provider churn, midnight kickoffs, and conflicting format tags.
 - **Multi-CDN Stream Deduplication & Ranking:** Unwraps bridged player URLs, strips donation/non-media junk, detects ClearKey/Widevine/FairPlay DRM, folds identical CDN mirrors across providers while preserving distinct resolution (`maxh`), language, and broadcaster feeds, and ranks streams by protocol, resolution, verification, and reliability.
-- **Hardened Streaming Media Proxy (`/api/proxy`):** Zero-copy passthrough with HTTP `Range` (`206 Partial Content`), streaming HLS M3U8 rewriting, SSRF CIDR blocking, header sanitization, upstream CORS isolation, and optional Web Crypto HMAC-SHA256 signed URLs.
+- **Hardened Streaming Media Proxy (`/api/proxy`):** Zero-copy passthrough with HTTP `Range` (`206 Partial Content`), streaming HLS M3U8 rewriting, opt-in lightweight unencrypted MPEG-DASH (`.mpd`) -> HLS v7 fMP4 (`.m3u8`) conversion (`?hls=1` / `?dashToHls=true`, **off by default**, rejects DRM with `422`), SSRF CIDR blocking, header sanitization, upstream CORS isolation, and optional Web Crypto HMAC-SHA256 signed URLs.
 - **Two-Tier Edge Cache & Token Safety:** Memory-bounded L1 isolate LRU (`16 MiB`) backed by Cloudflare Cache API L2, canonicalized query keys (defeats cache-busting DoS), origin/signing key isolation, and dynamic TTL capping against upstream stream token expiry.
 - **Runtime Resilience:** Per-request subrequest budget (`<= 42`), soft-quorum catalog refresh that never overwrites a healthier warm snapshot with a degraded partial refresh, per-host circuit breaker, and lazy-clock `workerd`-safe telemetry.
 
@@ -52,13 +52,13 @@ All JSON routes return `{ data, meta }` on success and RFC 9457 `application/pro
 
 | Method | Endpoint | Caching | Description |
 | :--- | :--- | :--- | :--- |
-| `GET` `HEAD` | `/` | `300s` + `ETag` | Service manifest, version (`1.0.0`), provider list, and `/api/*` link templates |
+| `GET` `HEAD` | `/` | `300s` + `ETag` | Service manifest, version (`1.0.1`), provider list, and `/api/*` link templates |
 | `GET` `HEAD` | `/api/facets` | `30s` + `ETag` | Counts (`live`, `upcoming`, `ended`, `active`) and facets (`sports`, `competitions`, `teams`, `broadcasters`) |
 | `GET` `HEAD` | `/api/events` | `15s`–`60s` + `ETag` | Unified schedule with multi-facet filters, search, sorting, pagination, and optional `?include=debug` |
 | `GET` `HEAD` | `/api/events/:id` | `<= 20s` (token-capped) | Event detail plus embedded ranked streams (`?streams=false` for metadata only) |
 | `GET` `HEAD` | `/api/stream/:id` | `<= 20s` (token-capped) | Dedicated stream lookup/refresh with language, quality, broadcaster, protocol, and DRM filters |
-| `GET` `HEAD` `OPTIONS` | `/api/proxy` | Passthrough / `5s` M3U8 | Zero-copy Range/DASH/HLS proxy and M3U8 URL rewriter (optional HMAC-SHA256 verification) |
-| `GET` `HEAD` | `/api/health` | `no-store` | PoP metadata, provider availability (`6/6`), catalog freshness, and circuit-breaker states |
+| `GET` `HEAD` `OPTIONS` | `/api/proxy` | Passthrough / `2s`–`30s` | Zero-copy Range/DASH/HLS proxy, M3U8 rewriter, and opt-in `?hls=1` unencrypted DASH->HLS converter (off by default) |
+| `GET` `HEAD` | `/api/health` | `no-store` | PoP metadata, provider availability (`6/6`), CNCVerse profile status, catalog freshness, and circuit-breaker states |
 | `GET` `HEAD` | `/api/metrics` | `no-store` | Per-route `p50`/`p95`/`p99` latency, L1/L2 cache stats, dead-stream count, reconciliation audit |
 | `GET` `HEAD` | `/api/openapi.json` | `3600s` + `ETag` | Lazy-generated OpenAPI 3.1.0 specification locked 1:1 to all 9 routes |
 
@@ -103,6 +103,7 @@ All JSON routes return `{ data, meta }` on success and RFC 9457 `application/pro
 | `drmFree` | `true` \| `false` | — | Excludes ClearKey/Widevine/FairPlay streams when `true` |
 | `webPlayable` | `true` \| `false` | — | Filters browser-playable HLS/DASH/ClearKey feeds |
 | `inspect` | `true` \| `false` | `true` | `false` skips live HLS master playlist probing for lowest latency |
+| `dashToHls` | `true` \| `false` | `false` | Opt-in: appends `&hls=1` (and HMAC signature when signing is enabled) to `proxyUrl` for **unencrypted** DASH streams only |
 | `include` | `debug` | — | Includes per-provider stream fetch timings and spam exclusion audit |
 
 </details>
@@ -131,11 +132,12 @@ curl -sS https://<worker-domain>/api/metrics
 {
   "data": {
     "service": "PlayOn",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "status": "ok",
     "catalog": "warm",
     "edge": { "colo": "SIN", "country": "SG", "city": "Singapore" },
     "providers": { "total": 6, "healthy": 6 },
+    "profile": { "mode": "auto", "active": true, "rotations": 0, "expiresAt": "2026-11-26T15:34:25.506Z" },
     "upstreamHosts": [
       { "host": "https://cncverse.dpdns.org", "state": "closed", "failures": 0 }
     ]
@@ -201,6 +203,7 @@ src/
 ├── domain/                  # Pure deterministic logic (statically checked: zero I/O or ambient clock)
 │   ├── channel.ts           # Broadcaster normalization, language extraction & host/path inference
 │   ├── cnc.ts               # Base64/UTF-8 rawId decoder & schema validator with exclusion audit
+│   ├── dash.ts              # Pure unencrypted MPEG-DASH (.mpd) -> HLS v7 fMP4 (.m3u8) converter
 │   ├── drm.ts               # ClearKey, Widevine & FairPlay detector
 │   ├── identity.ts          # Format, session, stage, gender, age-group & conflict matrix
 │   ├── m3u8.ts              # SSRF CIDR/host checks, HLS master parser & fast M3U8 rewriter
@@ -244,9 +247,11 @@ Copy `.dev.vars.example` to `.dev.vars` for local `wrangler dev`, or configure p
 | Variable | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `PROXY_SIGNING_SECRET` | Secret | *(unset)* | 32-byte random hex key enabling mandatory HMAC-SHA256 signed URLs on `/api/proxy` (recommended in production) |
-| `PROXY_SIG_TTL_SEC` | Var | `21600` | Signed proxy URL lifetime in seconds (clamped to `60..86400`) |
+| `PROXY_SIG_TTL_SEC` | Var | `21600` | Signed proxy URL lifetime in seconds (clamped to `30..86400`) |
 | `PROXY_ALLOWED_HOSTS` | Var | *(any public host)* | Comma-separated egress allowlist supporting leading wildcards (e.g. `*.akamaized.net,*.aiv-cdn.net`) |
 | `ALLOWED_ORIGINS` | Var | `*` | Comma-separated CORS origin allowlist (reflects matched origin with `Vary: Origin, Accept-Encoding`) |
+| `CNC_PROFILES` | Var | *(auto-provision)* | Optional comma-separated static CNCVerse profile ID pool (`p_...`); when unset, PlayOn auto-provisions & rotates anonymous 6-provider profiles |
+| `CNC_PROFILE_TTL_SEC` | Var | `21600` | CNCVerse profile rotation TTL in seconds (clamped to `300..86400`; also rotates reactively on `403`/`429`) |
 | `LOG_LEVEL` | Var | `silent` | Structured JSON request logging (`silent` \| `error` \| `info`) |
 
 ---
@@ -259,14 +264,14 @@ npm install
 # Quality gates
 npm run typecheck     # Strict tsc --noEmit (strict + noUncheckedIndexedAccess)
 npm run lint          # Architecture boundary, workerd safety & hygiene check
-npm test              # 128-test Vitest suite (unit, contract, chaos, fuzz, security)
+npm test              # 141-test Vitest suite (unit, contract, chaos, fuzz, security)
 npm run build         # Bundles dist/index.js (es2022 ESM, unminified)
 npm run bench         # Deterministic CPU, latency, payload & footprint benchmark
 
 # Run locally on Cloudflare workerd (http://127.0.0.1:3000)
 npm run dev
 
-# End-to-end live HTTP smoke verification (15 checks incl. 304, 405, SSRF 403, live HLS proxy)
+# End-to-end live HTTP smoke verification (16 checks incl. 6/6 providers, Cricify, opt-in DASH->HLS)
 npm run smoke -- http://127.0.0.1:3000
 ```
 
@@ -303,4 +308,4 @@ npx wrangler rollback
 
 ## Release History
 
-See [CHANGELOG.md](./CHANGELOG.md) for release notes and version history (`v1.0.0`).
+See [CHANGELOG.md](./CHANGELOG.md) for release notes and version history (`v1.0.1`).

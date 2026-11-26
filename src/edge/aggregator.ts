@@ -8,14 +8,14 @@ import {
 import { computeMinTokenExpiryMs, extractForwardHeaders, StreamEngine, type RawProviderStreamInput } from "../domain/streams";
 import type {
   EventDetailPayload, EventsQuery, FacetsPayload, PlayableStream, ProxyEnv,
-  StreamProtocol, StreamProviderBreakdown, StreamQuery, StreamsPayload,
+  StreamProtocol, StreamProviderBreakdown, StreamQuery, StreamsPayload, WorkerEnv,
 } from "../types";
 import type { RequestBudget } from "./budget";
 import type { EdgeCache } from "./cache";
 import { DeadStreamTracker } from "./dead-streams";
 import { HlsInspector } from "./hls";
 import { buildSignedProxyUrl, resolveProxySigTtlSec } from "./signing";
-import { mapWithConcurrency, UpstreamClient } from "./upstream";
+import { mapWithConcurrency, UpstreamClient, type ProfileConfig } from "./upstream";
 
 export { buildCatalogSnapshot, extractCandidate, hydrateSnapshot, serializeSnapshot, type CatalogSnapshot, type IndexedEventRecord, type ProviderCatalogResult };
 
@@ -23,8 +23,12 @@ const SNAPSHOT_SOFT_TTL_MS = 45_000, SNAPSHOT_HARD_TTL_MS = 300_000, L2_SNAPSHOT
 const FANOUT_CONC = 4, HLS_PROBE_MAX = 3, HLS_PROBE_BUDGET_MS = 1_200, DEFAULT_QUORUM_MS = 1_800, DEFAULT_MIN_QUORUM = 3;
 
 export interface AggregatorOptions { cache?: EdgeCache; deadStreams?: DeadStreamTracker; softQuorumMs?: number; minQuorumProviders?: number; }
-export interface StreamFetchContext { proxyOrigin?: string; env?: ProxyEnv; budget?: RequestBudget; }
+export interface StreamFetchContext { proxyOrigin?: string; env?: ProxyEnv & Partial<WorkerEnv>; budget?: RequestBudget; waitUntil?: (p: Promise<unknown>) => void; }
 export interface StreamFetchResult { payload: StreamsPayload; allStreams: PlayableStream[]; minTokenExpiryMs: number | null; signExpMs: number | null; }
+
+const toProfileCfg = (env?: Partial<WorkerEnv>, waitUntil?: (p: Promise<unknown>) => void): ProfileConfig => ({
+  profilesRaw: env?.CNC_PROFILES, ttlSecRaw: env?.CNC_PROFILE_TTL_SEC, waitUntil,
+});
 
 export class Aggregator {
   private snapshot: CatalogSnapshot | null = null;
@@ -41,37 +45,38 @@ export class Aggregator {
 
   clearSnapshot(): void { this.snapshot = null; this.refreshPromise = null; }
 
-  getWarmSnapshotSync(waitUntil?: (p: Promise<unknown>) => void): CatalogSnapshot | null {
+  getWarmSnapshotSync(waitUntil?: (p: Promise<unknown>) => void, env?: Partial<WorkerEnv>): CatalogSnapshot | null {
     if (!this.snapshot) return null;
     const age = Date.now() - this.snapshot.fetchedAtMs;
     if (age < SNAPSHOT_SOFT_TTL_MS) return this.snapshot;
-    if (age < SNAPSHOT_HARD_TTL_MS) { const bg = this.refreshSnapshot(waitUntil).catch(() => this.snapshot); if (waitUntil) waitUntil(bg); return this.snapshot; }
+    if (age < SNAPSHOT_HARD_TTL_MS) { const bg = this.refreshSnapshot(waitUntil, undefined, env).catch(() => this.snapshot); if (waitUntil) waitUntil(bg); return this.snapshot; }
     return null;
   }
 
-  async getSnapshot(waitUntil?: (p: Promise<unknown>) => void, force = false, budget?: RequestBudget): Promise<CatalogSnapshot> {
-    if (!force) { const w = this.getWarmSnapshotSync(waitUntil); if (w) return w; }
+  async getSnapshot(waitUntil?: (p: Promise<unknown>) => void, force = false, budget?: RequestBudget, env?: Partial<WorkerEnv>): Promise<CatalogSnapshot> {
+    if (!force) { const w = this.getWarmSnapshotSync(waitUntil, env); if (w) return w; }
     const now = Date.now();
     if (!force && !this.snapshot && this.cache) {
       const raw = await this.cache.getSnapshotText(L2_SNAPSHOT_KEY), hyd = raw ? hydrateSnapshot(raw) : null;
       if (hyd && now - hyd.fetchedAtMs < SNAPSHOT_HARD_TTL_MS) {
         this.snapshot = hyd;
-        if (now - hyd.fetchedAtMs >= SNAPSHOT_SOFT_TTL_MS) { const bg = this.refreshSnapshot(waitUntil).catch(() => this.snapshot); if (waitUntil) waitUntil(bg); }
+        if (now - hyd.fetchedAtMs >= SNAPSHOT_SOFT_TTL_MS) { const bg = this.refreshSnapshot(waitUntil, undefined, env).catch(() => this.snapshot); if (waitUntil) waitUntil(bg); }
         return hyd;
       }
     }
-    try { return await this.refreshSnapshot(waitUntil, budget); }
+    try { return await this.refreshSnapshot(waitUntil, budget, env); }
     catch (err) { if (this.snapshot) return { ...this.snapshot, stale: true, degraded: true }; throw err; }
   }
 
-  private refreshSnapshot(waitUntil?: (p: Promise<unknown>) => void, budget?: RequestBudget): Promise<CatalogSnapshot> {
+  private refreshSnapshot(waitUntil?: (p: Promise<unknown>) => void, budget?: RequestBudget, env?: Partial<WorkerEnv>): Promise<CatalogSnapshot> {
     if (this.refreshPromise) return this.refreshPromise;
     const done: Array<ProviderCatalogResult | null> = new Array(PROVIDERS.length).fill(null);
     const fail = (p: (typeof PROVIDERS)[number]): ProviderCatalogResult => ({ provider: p.key, name: p.name, items: [], rawCount: 0, exclusions: [], healthy: false });
+    const pCfg = toProfileCfg(env, waitUntil);
     let healthy = 0;
 
     const full = mapWithConcurrency(PROVIDERS, FANOUT_CONC, async (p, idx) => {
-      try { const r = await this.upstream.fetchCatalog(p.key, p.id, budget); healthy++; return (done[idx] = { provider: p.key, name: p.name, items: r.items, rawCount: r.rawCount, exclusions: r.exclusions, healthy: true }); }
+      try { const r = await this.upstream.fetchCatalog(p.key, p.id, budget, pCfg); healthy++; return (done[idx] = { provider: p.key, name: p.name, items: r.items, rawCount: r.rawCount, exclusions: r.exclusions, healthy: true }); }
       catch { return (done[idx] = fail(p)); }
     }).then((res) => {
       if (!res.some((r) => r.healthy)) throw new Error("All upstream catalog providers are unreachable");
@@ -105,6 +110,7 @@ export class Aggregator {
     const rec = snap.byId.get(eventId);
     if (!rec) return null;
     const proxyOrigin = ctx.proxyOrigin ?? "", allowedHosts = ctx.env?.PROXY_ALLOWED_HOSTS, secret = ctx.env?.PROXY_SIGNING_SECRET?.trim() || "", budget = ctx.budget;
+    const pCfg = toProfileCfg(ctx.env, ctx.waitUntil);
     const tasks: Array<{ provider: string; rawId: string }> = [], bd = new Map<string, StreamProviderBreakdown>();
     for (const [provider, rawIds] of Object.entries(rec.debug.providerRawIds).sort((a, b) => cmp(a[0], b[0]))) {
       bd.set(provider, { provider, name: PROVIDER_NAME_BY_KEY[provider] ?? provider, rawIdsQueried: rawIds.length, rawStreamsReturned: 0, status: "empty", latencyMs: 0 });
@@ -114,7 +120,7 @@ export class Aggregator {
     await mapWithConcurrency(tasks, FANOUT_CONC, async ({ provider, rawId }) => {
       const t0 = performance.now(), b = bd.get(provider);
       try {
-        const list = await this.upstream.fetchStreams(rawId, budget);
+        const list = await this.upstream.fetchStreams(rawId, budget, pCfg);
         if (b) { b.latencyMs = Math.max(b.latencyMs, Math.round((performance.now() - t0) * 100) / 100); b.rawStreamsReturned += list.length; if (list.length) b.status = "ok"; }
         for (const stream of list) rawInputs.push({ provider, stream });
       } catch { if (b && b.status !== "ok") b.status = "failed"; }
@@ -137,11 +143,16 @@ export class Aggregator {
       }
     }
 
+    const useDashHls = (s: PlayableStream): boolean => q.dashToHls === true && s.protocol === "dash" && s.drm === null;
     let signExpMs: number | null = null;
     if (secret && deduped.length) {
       const expSec = Math.floor(Date.now() / 1000) + resolveProxySigTtlSec(ctx.env?.PROXY_SIG_TTL_SEC);
       signExpMs = expSec * 1000;
-      await Promise.all(deduped.map(async (s) => { s.proxyUrl = await buildSignedProxyUrl(proxyOrigin, { url: s.url, ...extractForwardHeaders(s.headers), rewrite: true }, secret, expSec); }));
+      await Promise.all(deduped.map(async (s) => {
+        s.proxyUrl = await buildSignedProxyUrl(proxyOrigin, { url: s.url, ...extractForwardHeaders(s.headers), rewrite: true, ...(useDashHls(s) ? { hls: true } : {}) }, secret, expSec);
+      }));
+    } else if (q.dashToHls === true && deduped.length) {
+      for (const s of deduped) if (useDashHls(s)) s.proxyUrl += "&hls=1";
     }
 
     const langs: string[] = [], quals: string[] = [], protos: StreamProtocol[] = [], bcs: string[] = [], out: PlayableStream[] = [];

@@ -1,6 +1,6 @@
 {
   "name": "playon",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "PlayOn — zero-dependency Cloudflare Workers live-sports aggregator, match reconciliation engine, and edge stream router",
   "main": "src/index.ts",

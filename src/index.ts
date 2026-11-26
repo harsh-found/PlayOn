@@ -50,7 +50,7 @@ function parseStreamQuery(qs: string): { query: StreamQuery; includeStreams?: bo
     if (!v) return;
     if (STR_STREAM_KEYS.has(k)) q[k] = v;
     else if (k === "protocol") { const l = v.toLowerCase(); if (!PROTOS.has(l)) error = "Invalid 'protocol'. Expected hls | dash | direct."; else q.protocol = l as StreamProtocol; }
-    else if (k === "drmFree" || k === "webPlayable" || k === "inspect") q[k] = parseBoolOpt(v);
+    else if (k === "drmFree" || k === "webPlayable" || k === "inspect" || k === "dashToHls") q[k] = parseBoolOpt(v);
     else if (k === "streams") includeStreams = parseBoolOpt(v);
     else if (k === "include" && v.toLowerCase().split(",").includes("debug")) q.includeDebug = true;
   });
@@ -109,7 +109,7 @@ function finalizeResponse(res: Response, method: string, requestId: string, durM
 }
 
 export function createApp(deps: AppDependencies = {}) {
-  const cache = deps.cache ?? new EdgeCache(), aggregator = deps.aggregator ?? new Aggregator(new UpstreamClient(), undefined, { cache }), telemetry = deps.telemetry ?? new EdgeTelemetry();
+  const cache = deps.cache ?? new EdgeCache(), aggregator = deps.aggregator ?? new Aggregator(new UpstreamClient(undefined, cache), undefined, { cache }), telemetry = deps.telemetry ?? new EdgeTelemetry();
   const UPSTREAM_ERR = "All upstream catalog providers are unreachable.";
 
   const app = {
@@ -140,8 +140,8 @@ export function createApp(deps: AppDependencies = {}) {
         const d0 = dur(), l1 = cache.getL1Sync(key, request, reqId, `total;dur=${d0}`, cors);
         if (l1) return finish(l1, d0);
         const putSnap = (snap: CatalogSnapshot) => { const { body, etag } = render(snap), d1 = dur(); return finish(cache.putRawJson(key, request, body, ttlOf(snap), 30, waitUntil, reqId, `total;dur=${d1}`, etag, cors), d1, snap.degraded || snap.stale); };
-        if (!cache.hasL2()) { cache.recordMiss(); const warm = aggregator.getWarmSnapshotSync(waitUntil); if (warm) return putSnap(warm); }
-        return (async () => { try { return (await checkL2(key, d0)) ?? putSnap(await aggregator.getSnapshot(waitUntil, false, budget)); } catch { return finish(prob(503, "UPSTREAM_UNAVAILABLE", UPSTREAM_ERR), dur(), true); } })();
+        if (!cache.hasL2()) { cache.recordMiss(); const warm = aggregator.getWarmSnapshotSync(waitUntil, env); if (warm) return putSnap(warm); }
+        return (async () => { try { return (await checkL2(key, d0)) ?? putSnap(await aggregator.getSnapshot(waitUntil, false, budget, env)); } catch { return finish(prob(503, "UPSTREAM_UNAVAILABLE", UPSTREAM_ERR), dur(), true); } })();
       };
 
       if (pathname === "/api/events") {
@@ -180,11 +180,11 @@ export function createApp(deps: AppDependencies = {}) {
               const pSq = parseStreamQuery(queryStr);
               if ("error" in pSq) return finish(prob(400, "INVALID_QUERY", pSq.error));
               const sq = pSq.query, incS = pSq.includeStreams !== false;
-              const key = EdgeCache.buildKey(isStr ? "stream" : "event", { id, origin, signed: env?.PROXY_SIGNING_SECRET?.trim() ? "1" : "0", ...(isStr ? {} : { streams: incS }), language: sq.language, quality: sq.quality, protocol: sq.protocol, provider: sq.provider, broadcaster: sq.broadcaster, drmFree: sq.drmFree, webPlayable: sq.webPlayable, inspect: sq.inspect, debug: sq.includeDebug });
+              const key = EdgeCache.buildKey(isStr ? "stream" : "event", { id, origin, signed: env?.PROXY_SIGNING_SECRET?.trim() ? "1" : "0", ...(isStr ? {} : { streams: incS }), language: sq.language, quality: sq.quality, protocol: sq.protocol, provider: sq.provider, broadcaster: sq.broadcaster, drmFree: sq.drmFree, webPlayable: sq.webPlayable, inspect: sq.inspect, dashToHls: sq.dashToHls ? "1" : undefined, debug: sq.includeDebug });
               const cached = await checkCache(key);
               if (cached) return cached;
               try {
-                const snap = await aggregator.getSnapshot(waitUntil, false, budget), sCtx = { proxyOrigin: origin, env, budget };
+                const snap = await aggregator.getSnapshot(waitUntil, false, budget, env), sCtx = { proxyOrigin: origin, env, budget, waitUntil };
                 const res = isStr ? await aggregator.resolveEventStreams(snap, id, sq, sCtx) : await aggregator.resolveEventDetail(snap, id, incS, sq, sCtx);
                 if (!res) return finish(prob(404, "EVENT_NOT_FOUND", `Event '${id}' was not found.`));
                 const ttl = computeStreamTtl(20, snap.stale || snap.degraded, res.minTokenExpiryMs, res.signExpMs), d1 = dur();
@@ -207,11 +207,11 @@ export function createApp(deps: AppDependencies = {}) {
 
           if (pathname === "/api/health" || pathname === "/api/metrics") {
             let snap: CatalogSnapshot | null = null;
-            try { snap = await aggregator.getSnapshot(waitUntil, false, budget); } catch { snap = null; }
+            try { snap = await aggregator.getSnapshot(waitUntil, false, budget, env); } catch { snap = null; }
             const d = dur(), hdrs = buildEdgeHeaders(cors, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Request-Id": reqId, "Server-Timing": `total;dur=${d}` });
             const isH = pathname === "/api/health", hosts = isH ? aggregator.upstream.getHostHealth() : [], healthy = snap?.healthyProviders ?? 0, ok = !isH || (!hosts.every((h) => h.state === "open") && healthy > 0);
             const recon = !snap ? null : queryStr.includes("detail=full") ? snap.reconciliation : { generatedAt: snap.reconciliation.generatedAt, summary: snap.reconciliation.summary, providerAccounting: snap.reconciliation.providerAccounting };
-            const data = isH ? { service: SERVICE_NAME, version: API_VERSION, status: ok ? "ok" : "degraded", catalog: !snap || snap.stale || snap.degraded ? "degraded" : "warm", edge: { colo, country: cf?.country ?? "XX", city: cf?.city ?? "Unknown" }, providers: { total: PROVIDERS.length, healthy }, upstreamHosts: hosts } : { telemetry: telemetry.snapshot(), cache: cache.getStats(), deadStreams: aggregator.deadStreams.size, reconciliation: recon };
+            const data = isH ? { service: SERVICE_NAME, version: API_VERSION, status: ok ? "ok" : "degraded", catalog: !snap || snap.stale || snap.degraded ? "degraded" : "warm", edge: { colo, country: cf?.country ?? "XX", city: cf?.city ?? "Unknown" }, providers: { total: PROVIDERS.length, healthy }, profile: aggregator.upstream.getProfileStatus(), upstreamHosts: hosts } : { telemetry: telemetry.snapshot(), cache: cache.getStats(), deadStreams: aggregator.deadStreams.size, reconciliation: recon };
             const stale = isH ? !ok : recon === null;
             return finish(new Response(method === "HEAD" ? null : JSON.stringify({ data, meta: { stale, generatedAt: new Date().toISOString() } }), { status: isH && !ok ? 503 : 200, headers: hdrs }), d, stale);
           }

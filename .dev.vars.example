@@ -4,7 +4,7 @@
 # Optional: HMAC-SHA256 signing secret for /api/proxy (strongly recommended in production to prevent open-proxy abuse)
 PROXY_SIGNING_SECRET=replace-with-32-byte-random-hex-secret
 
-# Optional: Signed /api/proxy URL TTL in seconds (default: 21600 = 6 hours, clamped to [60, 86400])
+# Optional: Signed /api/proxy URL TTL in seconds (default: 21600 = 6 hours, clamped to [30, 86400])
 PROXY_SIG_TTL_SEC=21600
 
 # Optional: Comma-separated egress host allowlist for /api/proxy (supports leading wildcard *.domain.com)
@@ -12,6 +12,12 @@ PROXY_SIG_TTL_SEC=21600
 
 # Optional: Comma-separated CORS origin allowlist (default: "*" when unset)
 # ALLOWED_ORIGINS=https://app.example.com,https://staging.example.com
+
+# Optional: Static comma-separated CNCVerse profile ID pool (when unset, PlayOn auto-provisions & rotates anonymous 6-provider profiles)
+# CNC_PROFILES=p_example11111,p_example22222
+
+# Optional: CNCVerse profile rotation TTL in seconds (default: 21600 = 6 hours, clamped to [300, 86400])
+# CNC_PROFILE_TTL_SEC=21600
 
 # Optional: Structured JSON request logging level (silent | error | info; default: silent)
 LOG_LEVEL=info

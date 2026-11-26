@@ -23,7 +23,7 @@ const pList = (spec: string) =>
     return { name, in: loc === "p" ? "path" : "query", required: req === "1", description: desc, schema: { type: t === "i" ? "integer" : t === "b" ? "boolean" : "string" } };
   });
 
-const STREAM_Q = "language|q|s|ISO 639-2;quality|q|s|Quality tier;protocol|q|s|hls|dash|direct;provider|q|s|Provider key;broadcaster|q|s|Broadcaster;drmFree|q|b|DRM-free only;webPlayable|q|b|Browser-playable;inspect|q|b|HLS probe;include|q|s|debug";
+const STREAM_Q = "language|q|s|ISO 639-2;quality|q|s|Quality tier;protocol|q|s|hls|dash|direct;provider|q|s|Provider key;broadcaster|q|s|Broadcaster;drmFree|q|b|DRM-free only;webPlayable|q|b|Browser-playable;inspect|q|b|HLS probe;dashToHls|q|b|Opt-in unencrypted DASH to HLS proxyUrl (default false);include|q|s|debug";
 
 export function buildOpenApiSpec(): Record<string, unknown> {
   if (cachedSpecObject) return cachedSpecObject;
@@ -38,7 +38,7 @@ export function buildOpenApiSpec(): Record<string, unknown> {
     ["/api/events", "listEvents", "Unified events", jR("Events", "CollectionEvents"), "304,400,405,503", "status|q|s|Status;sport|q|s|Sport;competition|q|s|Competition;team|q|s|Team;broadcaster|q|s|Broadcaster;language|q|s|Language;kind|q|s|Kind;provider|q|s|Provider;minProviders|q|i|Min providers;hot|q|b|Hot;date|q|s|YYYY-MM-DD;from|q|s|ISO start;to|q|s|ISO end;window|q|s|Window;q|q|s|Search;sort|q|s|Sort;limit|q|i|1-100;offset|q|i|Offset;page|q|i|Page;include|q|s|debug"],
     ["/api/events/{id}", "getEventDetail", "Event detail", jR("Event detail", "ResourceEventDetail"), "304,400,404,405,503", `id|p|s|Event ID|1;streams|q|b|Include streams;${STREAM_Q}`],
     ["/api/stream/{id}", "getEventStreams", "Dedicated fast stream lookup", jR("Streams", "ResourceStreams"), "304,400,404,405,503", `id|p|s|Event ID|1;${STREAM_Q}`],
-    ["/api/proxy", "proxyStream", "Hardened media proxy", { description: "Media/M3U8" }, "206,400,403,405,413,502,503", "url|q|s|Public URL|1;referer|q|s|Referer;origin|q|s|Origin;ua|q|s|User-Agent;rewrite|q|b|Rewrite M3U8;exp|q|i|HMAC expiry epoch seconds;sig|q|s|HMAC-SHA256 signature"],
+    ["/api/proxy", "proxyStream", "Hardened media proxy", { description: "Media/M3U8" }, "206,400,403,405,413,422,502,503,504", "url|q|s|Public URL|1;referer|q|s|Referer;origin|q|s|Origin;ua|q|s|User-Agent;rewrite|q|b|Rewrite M3U8;hls|q|b|Opt-in unencrypted DASH to HLS (default false);rep|q|s|DASH representation ID;exp|q|i|HMAC expiry epoch seconds;sig|q|s|HMAC-SHA256 signature"],
     ["/api/health", "getHealth", "PoP health", jR("Healthy"), "405,503h"],
     ["/api/metrics", "getMetrics", "Telemetry & reconciliation", jR("Metrics"), "405", "detail|q|s|full"],
     ["/api/openapi.json", "getOpenApiSpec", "OpenAPI 3.1.0 schema", jR("OpenAPI JSON"), "304,405"],

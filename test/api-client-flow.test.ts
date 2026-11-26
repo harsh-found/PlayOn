@@ -48,13 +48,13 @@ describe("PlayOn End-to-End API Client Flow", () => {
     // 1. Root manifest
     const rootRes = await app.fetch(new Request("https://api.playon.dev/"));
     expect(rootRes.status).toBe(200);
-    expect(rootRes.headers.get("X-PlayOn-Version")).toBe("1.0.0");
+    expect(rootRes.headers.get("X-PlayOn-Version")).toBe("1.0.1");
     expect(rootRes.headers.get("Server-Timing")).toMatch(/^total;dur=/);
     expect(rootRes.headers.get("Vary")).toBe("Accept-Encoding");
     expect(rootRes.headers.get("X-Request-Id")).toBeTruthy();
     const manifest = (await rootRes.json()) as { data: { service: string; version: string; links: Record<string, string> }; meta: { stale: boolean; generatedAt: string } };
     expect(manifest.data.service).toBe("PlayOn");
-    expect(manifest.data.version).toBe("1.0.0");
+    expect(manifest.data.version).toBe("1.0.1");
     expect(manifest.data.links.facets).toBe("/api/facets");
     expect(manifest.data.links.stream).toBe("/api/stream/{id}");
     expect(manifest.meta.stale).toBe(false);

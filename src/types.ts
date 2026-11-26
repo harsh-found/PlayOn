@@ -1,4 +1,4 @@
-export const API_VERSION = "1.0.0";
+export const API_VERSION = "1.0.1";
 export const SERVICE_NAME = "PlayOn";
 
 export type EventKind = "match" | "session" | "channel" | "show";
@@ -17,6 +17,8 @@ export interface ProxyEnv {
 export interface WorkerEnv extends ProxyEnv {
   ENVIRONMENT?: string;
   LOG_LEVEL?: string;
+  CNC_PROFILES?: string;
+  CNC_PROFILE_TTL_SEC?: string;
 }
 
 export interface EventTeam {
@@ -262,6 +264,7 @@ export interface StreamQuery {
   drmFree?: boolean;
   webPlayable?: boolean;
   inspect?: boolean;
+  dashToHls?: boolean;
   includeDebug?: boolean;
 }
 

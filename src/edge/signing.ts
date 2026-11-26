@@ -2,7 +2,7 @@ export const DEFAULT_PROXY_SIG_TTL_SEC = 21_600;
 const keyCache = new Map<string, Promise<CryptoKey>>();
 const TEXT_ENCODER = new TextEncoder();
 
-export interface ProxySignParams { url: string; referer?: string | null; origin?: string | null; ua?: string | null; rewrite: boolean; }
+export interface ProxySignParams { url: string; referer?: string | null; origin?: string | null; ua?: string | null; rewrite: boolean; hls?: boolean; rep?: string | null; }
 
 export function resolveProxySigTtlSec(raw?: string): number {
   const n = raw ? Number.parseInt(raw.trim(), 10) : NaN;
@@ -19,7 +19,8 @@ function getHmacKey(secret: string): Promise<CryptoKey> {
 }
 
 export async function signProxyPayload(params: ProxySignParams, expSec: number, secret: string): Promise<string> {
-  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", await getHmacKey(secret), TEXT_ENCODER.encode(`${params.url}\n${params.referer ?? ""}\n${params.origin ?? ""}\n${params.ua ?? ""}\n${params.rewrite ? "1" : "0"}\n${expSec}`)));
+  const hlsPart = params.hls ? `\n1\n${params.rep ?? ""}` : "";
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", await getHmacKey(secret), TEXT_ENCODER.encode(`${params.url}\n${params.referer ?? ""}\n${params.origin ?? ""}\n${params.ua ?? ""}\n${params.rewrite ? "1" : "0"}\n${expSec}${hlsPart}`)));
   let bin = "";
   for (const b of sig) bin += String.fromCharCode(b);
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -27,7 +28,7 @@ export async function signProxyPayload(params: ProxySignParams, expSec: number, 
 
 export async function buildSignedProxyUrl(proxyOrigin: string, params: ProxySignParams, secret: string, expSec: number): Promise<string> {
   const sig = await signProxyPayload(params, expSec, secret);
-  return `${proxyOrigin}/api/proxy?url=${encodeURIComponent(params.url)}${params.referer ? `&referer=${encodeURIComponent(params.referer)}` : ""}${params.origin ? `&origin=${encodeURIComponent(params.origin)}` : ""}${params.ua ? `&ua=${encodeURIComponent(params.ua)}` : ""}${params.rewrite ? "" : "&rewrite=false"}&exp=${expSec}&sig=${sig}`;
+  return `${proxyOrigin}/api/proxy?url=${encodeURIComponent(params.url)}${params.referer ? `&referer=${encodeURIComponent(params.referer)}` : ""}${params.origin ? `&origin=${encodeURIComponent(params.origin)}` : ""}${params.ua ? `&ua=${encodeURIComponent(params.ua)}` : ""}${params.rewrite ? "" : "&rewrite=false"}${params.hls ? "&hls=1" : ""}${params.hls && params.rep ? `&rep=${encodeURIComponent(params.rep)}` : ""}&exp=${expSec}&sig=${sig}`;
 }
 
 export async function verifySignedProxyParams(
